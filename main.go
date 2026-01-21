@@ -20,9 +20,10 @@ type CPUUsage struct {
 	Message string    `json:"message"`
 }
 
-type GPUUsage struct {
-	Infos   []gpu.GPUInfo `json:"infos"`
-	Message string        `json:"message"`
+type Resp struct {
+	Infos   any    `json:"infos,omitempty"`
+	Total   any    `json:"total,omitempty"`
+	Message string `json:"message,omitempty"`
 }
 
 type MemoryUsage struct {
@@ -33,22 +34,38 @@ type MemoryUsage struct {
 
 // 内部辅助函数：将 Go 字符串安全拷贝到 C Buffer 中
 func copyToCBuffer(buf *C.char, maxLen C.int, content []byte) C.int {
-	actualLen := len(content)
-	limit := int(maxLen) - 1 // 预留一个位置给 \0
+	if buf == nil || maxLen <= 0 {
+		return 0
+	}
+	capacity := int(maxLen)
 
-	copySize := actualLen
-	if copySize > limit {
-		copySize = limit
+	// capacity==1 时只能放 '\0'
+	limit := capacity - 1
+	if limit <= 0 {
+		*(*byte)(unsafe.Pointer(buf)) = 0
+		return 0
 	}
 
-	// 获取 C 指针对应的 Go slice
-	outSlice := (*[1 << 30]byte)(unsafe.Pointer(buf))[:copySize:copySize]
-	copy(outSlice, content[:copySize])
+	n := len(content)
+	if n > limit {
+		n = limit
+	}
 
-	// 强制添加 null 终止符（C 字符串标准）
-	(*[1 << 30]byte)(unsafe.Pointer(buf))[copySize] = 0
+	dst := unsafe.Slice((*byte)(unsafe.Pointer(buf)), capacity)
+	copy(dst[:n], content[:n])
+	dst[n] = 0
+	return C.int(n)
+}
 
-	return C.int(copySize)
+func detectTools() (hasNvidia bool, hasAmd bool) {
+	hasNvidia = gpu.HasCommand("nvidia-smi")
+	hasAmd = gpu.HasCommand("amd-smi") || gpu.HasCommand("rocm-smi")
+	return
+}
+
+func writeJSON(buf *C.char, maxLen C.int, v any) C.int {
+	b, _ := json.Marshal(v)
+	return copyToCBuffer(buf, maxLen, b)
 }
 
 //export GetCPUUsage
@@ -64,24 +81,64 @@ func GetCPUUsage(buf *C.char, maxLen C.int) C.int {
 	return copyToCBuffer(buf, maxLen, jsonData)
 }
 
-//export GetGPUUsage
-func GetGPUUsage(buf *C.char, maxLen C.int) C.int {
-	var res GPUUsage
-	hasNvidia := gpu.HasCommand("nvidia-smi")
-	hasAmd := gpu.HasCommand("rocm-smi")
+//export GetGPUStaticInfo
+func GetGPUStaticInfo(buf *C.char, maxLen C.int) C.int {
+	var res Resp
+	hasNvidia, hasAmd := detectTools()
 
 	if !hasNvidia && !hasAmd {
 		res.Message = "no gpu tools found"
-	} else {
-		infos, err := gpu.QueryOnce(hasNvidia, hasAmd)
-		if err != nil {
-			res.Message = err.Error()
-		} else {
-			res.Infos = infos
-		}
+		return writeJSON(buf, maxLen, res)
 	}
-	jsonData, _ := json.Marshal(res)
-	return copyToCBuffer(buf, maxLen, jsonData)
+
+	infos, err := gpu.QueryStaticInfo(hasNvidia, hasAmd)
+	if err != nil {
+		res.Message = err.Error()
+		return writeJSON(buf, maxLen, res)
+	}
+
+	res.Infos = infos
+	return writeJSON(buf, maxLen, res)
+}
+
+//export GetGPUDynamicAll
+func GetGPUDynamicAll(buf *C.char, maxLen C.int) C.int {
+	var res Resp
+	hasNvidia, hasAmd := detectTools()
+
+	if !hasNvidia && !hasAmd {
+		res.Message = "no gpu tools found"
+		return writeJSON(buf, maxLen, res)
+	}
+
+	infos, err := gpu.QueryDynamicAll(hasNvidia, hasAmd)
+	if err != nil {
+		res.Message = err.Error()
+		return writeJSON(buf, maxLen, res)
+	}
+
+	res.Infos = infos
+	return writeJSON(buf, maxLen, res)
+}
+
+//export GetGPUDynamicTotalAvg
+func GetGPUDynamicTotalAvg(buf *C.char, maxLen C.int) C.int {
+	var res Resp
+	hasNvidia, hasAmd := detectTools()
+
+	if !hasNvidia && !hasAmd {
+		res.Message = "no gpu tools found"
+		return writeJSON(buf, maxLen, res)
+	}
+
+	total, err := gpu.QueryDynamicTotalAvg(hasNvidia, hasAmd)
+	if err != nil {
+		res.Message = err.Error()
+		return writeJSON(buf, maxLen, res)
+	}
+
+	res.Total = total
+	return writeJSON(buf, maxLen, res)
 }
 
 //export GetMemUsage
@@ -98,4 +155,5 @@ func GetMemUsage(buf *C.char, maxLen C.int) C.int {
 	return copyToCBuffer(buf, maxLen, jsonData)
 }
 
-func main() {}
+func main() {
+}

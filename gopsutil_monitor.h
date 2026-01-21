@@ -89,7 +89,9 @@ extern "C" {
 #endif
 
 extern __declspec(dllexport) int GetCPUUsage(char* buf, int maxLen);
-extern __declspec(dllexport) int GetGPUUsage(char* buf, int maxLen);
+extern __declspec(dllexport) int GetGPUStaticInfo(char* buf, int maxLen);
+extern __declspec(dllexport) int GetGPUDynamicAll(char* buf, int maxLen);
+extern __declspec(dllexport) int GetGPUDynamicTotalAvg(char* buf, int maxLen);
 extern __declspec(dllexport) int GetMemUsage(char* buf, int maxLen);
 
 #ifdef __cplusplus
