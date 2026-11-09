@@ -4,3 +4,4 @@ _obj
 *.tmp
 .idea
 vendor
+build/render-resources/
